@@ -1,155 +1,150 @@
 package com.depth.live.wallpaper;
 
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.app.WallpaperManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Base64;
+import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
-import com.getcapacitor.BridgeActivity;
+import android.webkit.WebViewClient;
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
-public class MainActivity extends BridgeActivity {
+public class MainActivity extends Activity {
+    private static final int FILE_CHOOSER_REQUEST = 42;
+    private WebView webView;
+    private ValueCallback<Uri[]> fileCallback;
 
-    private DepthBridge depthBridge;
-
-    /**
-     * The interface has to be attached BEFORE the WebView evaluates the page:
-     * addJavascriptInterface() only becomes visible to JS on the next page load,
-     * so registering it in onStart() (after Capacitor already loaded index.html)
-     * left window.DepthAndroid undefined -> "Apply" silently fell back to saving
-     * a PNG and the "Set as Live Wallpaper" button stayed hidden.
-     */
-    @SuppressLint("JavascriptInterface")
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        attachDepthBridge();
+    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        getWindow().setStatusBarColor(android.graphics.Color.BLACK);
+        getWindow().setNavigationBarColor(android.graphics.Color.BLACK);
+        webView = new WebView(this);
+        webView.setLayoutParams(new ViewGroup.LayoutParams(-1, -1));
+        webView.setBackgroundColor(android.graphics.Color.BLACK);
+        WebSettings s = webView.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setAllowFileAccess(true);
+        s.setAllowContentAccess(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            s.setAllowFileAccessFromFileURLs(true);
+            s.setAllowUniversalAccessFromFileURLs(true);
+        }
+        webView.setWebViewClient(new WebViewClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = callback;
+                try { startActivityForResult(params.createIntent(), FILE_CHOOSER_REQUEST); }
+                catch (Exception e) {
+                    Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("image/*");
+                    startActivityForResult(pick, FILE_CHOOSER_REQUEST);
+                }
+                return true;
+            }
+        });
+        webView.addJavascriptInterface(new DepthBridge(this, webView), "DepthAndroid");
+        setContentView(webView);
+        webView.loadUrl("file:///android_asset/index.html");
     }
 
-    @Override
-    public void onStart() {
-        super.onStart();
-        attachDepthBridge(); // safety net if the WebView was not ready yet
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_CHOOSER_REQUEST && fileCallback != null) {
+            fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            fileCallback = null;
+        }
     }
 
-    @SuppressLint("JavascriptInterface")
-    private void attachDepthBridge() {
-        if (depthBridge != null) return;
-        if (getBridge() == null || getBridge().getWebView() == null) return;
-        WebView webView = getBridge().getWebView();
-        depthBridge = new DepthBridge(this);
-        webView.addJavascriptInterface(depthBridge, "DepthAndroid");
+    @Override public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) webView.goBack(); else super.onBackPressed();
     }
 
-    /**
-     * Native bridge consumed by the web editor:
-     *   window.DepthAndroid.apply(base64Jpeg, settingsJson) -> applies wallpaper
-     *   window.DepthAndroid.startLive()                     -> opens live-wallpaper picker
-     * Reports back via window.__depthApplied(targets) in the WebView.
-     */
+    @Override protected void onDestroy() {
+        if (webView != null) { webView.removeJavascriptInterface("DepthAndroid"); webView.destroy(); }
+        super.onDestroy();
+    }
+
     public static class DepthBridge {
         private final MainActivity activity;
+        private final WebView webView;
+        DepthBridge(MainActivity activity, WebView webView) { this.activity = activity; this.webView = webView; }
 
-        DepthBridge(MainActivity a) { this.activity = a; }
-
-        @JavascriptInterface
-        public String apply(String base64Image, String settingsJson) {
+        @JavascriptInterface public String apply(String base64Image, String settingsJson) {
             try {
                 byte[] data = Base64.decode(base64Image, Base64.DEFAULT);
-                Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length);
-                if (bmp == null) {
-                    notifyWebError("could not decode the exported image");
-                    return "decode-failed";
+                Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (bitmap == null) return fail("could not decode the exported image");
+                try (FileOutputStream out = activity.openFileOutput("depth-wallpaper.jpg", Context.MODE_PRIVATE)) {
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out);
                 }
-
-                FileOutputStream out = activity.openFileOutput("depth-wallpaper.jpg", Context.MODE_PRIVATE);
-                bmp.compress(Bitmap.CompressFormat.JPEG, 92, out);
-                out.close();
-
                 if (settingsJson != null) {
-                    FileOutputStream so = activity.openFileOutput("depth-settings.json", Context.MODE_PRIVATE);
-                    so.write(settingsJson.getBytes("UTF-8"));
-                    so.close();
+                    try (FileOutputStream out = activity.openFileOutput("depth-settings.json", Context.MODE_PRIVATE)) {
+                        out.write(settingsJson.getBytes(StandardCharsets.UTF_8));
+                    }
                 }
-
                 String targets = "both";
-                if (settingsJson != null) {
-                    try {
-                        targets = new JSONObject(settingsJson).optString("targets", "both");
-                    } catch (Exception parseError) {
-                        targets = "both";
-                    }
+                if (settingsJson != null) try { targets = new JSONObject(settingsJson).optString("targets", "both"); } catch (Exception ignored) {}
+                if (!"home".equals(targets) && !"lock".equals(targets)) targets = "both";
+                WallpaperManager manager = WallpaperManager.getInstance(activity);
+                boolean home = false, lock = false;
+                if ("home".equals(targets) || "both".equals(targets)) {
+                    if (Build.VERSION.SDK_INT >= 24) manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM);
+                    else manager.setBitmap(bitmap);
+                    home = true;
                 }
-                if (!"lock".equals(targets) && !"home".equals(targets)) targets = "both";
-
-                WallpaperManager wm = WallpaperManager.getInstance(activity);
-                boolean homeDone = false, lockDone = false;
-                if (targets.equals("home") || targets.equals("both")) {
-                    wm.setBitmap(bmp);
-                    homeDone = true;
+                if ("lock".equals(targets) || "both".equals(targets)) {
+                    if (Build.VERSION.SDK_INT >= 24) manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK);
+                    else manager.setBitmap(bitmap);
+                    lock = true;
                 }
-                if (targets.equals("lock") || targets.equals("both")) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        wm.setBitmap(bmp, null, true, WallpaperManager.FLAG_LOCK);
-                    } else {
-                        wm.setBitmap(bmp);
-                    }
-                    lockDone = true;
-                }
-                bmp.recycle();
-                notifyWeb(targets);
-                return "ok:" + (homeDone ? "home;" : "") + (lockDone ? "lock" : "");
-            } catch (Exception e) {
-                notifyWebError(e.getMessage());
-                return "error:" + e.getMessage();
-            }
+                bitmap.recycle();
+                notifyWeb("window.__depthApplied&&window.__depthApplied('" + escape(targets) + "');");
+                return "ok:" + (home ? "home;" : "") + (lock ? "lock" : "");
+            } catch (Exception e) { return fail(e.getMessage() == null ? "wallpaper apply failed" : e.getMessage()); }
         }
 
-        @JavascriptInterface
-        public void startLive() {
-            try {
-                Intent i = new Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER);
-                i.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                        new ComponentName(activity, DepthLiveWallpaperService.class));
-                activity.startActivity(i);
-            } catch (Exception ignored) { }
-        }
-
-        @JavascriptInterface
-        public boolean hasWallpaper() {
-            return new File(activity.getFilesDir(), "depth-wallpaper.jpg").exists();
-        }
-
-        private void notifyWeb(final String targets) {
-            eval("window.__depthApplied&&window.__depthApplied('" + esc(targets) + "');");
-        }
-
-        private void notifyWebError(final String message) {
-            eval("window.__depthFailed&&window.__depthFailed('" + esc(message == null ? "unknown error" : message) + "');");
-        }
-
-        private String esc(String s) {
-            return s == null ? "" : s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ");
-        }
-
-        private void eval(final String js) {
-            activity.runOnUiThread(new Runnable() {
-                @Override public void run() {
-                    if (activity.getBridge() != null && activity.getBridge().getWebView() != null) {
-                        activity.getBridge().getWebView().evaluateJavascript(js, null);
-                    }
-                }
+        @JavascriptInterface public void startLive() {
+            activity.runOnUiThread(() -> {
+                try {
+                    Intent i = new Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER);
+                    i.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, new ComponentName(activity, DepthLiveWallpaperService.class));
+                    activity.startActivity(i);
+                } catch (Exception e) { activity.startActivity(new Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER)); }
             });
         }
+        @JavascriptInterface public boolean hasWallpaper() { return new File(activity.getFilesDir(), "depth-wallpaper.jpg").exists(); }
+        @JavascriptInterface public void openAppSettings() {
+            activity.runOnUiThread(() -> activity.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.getPackageName()))));
+        }
+        private String fail(String message) {
+            notifyWeb("window.__depthFailed&&window.__depthFailed('" + escape(message) + "');");
+            return "error:" + message;
+        }
+        private void notifyWeb(String script) { activity.runOnUiThread(() -> webView.evaluateJavascript(script, null)); }
+        private String escape(String value) { return value == null ? "" : value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ").replace("\r", " "); }
     }
 }
