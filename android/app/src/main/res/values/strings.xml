@@ -1,8 +1,2 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Depth Clock</string>
-    <string name="title_activity_main">Depth Clock</string>
-    <string name="package_name">com.depth.live.wallpaper</string>
-    <string name="custom_url_scheme">com.depth.live.wallpaper</string>
-    <string name="wallpaper_desc">Depth Clock — Live</string>
-</resources>
+<resources><string name="app_name">Parallax Moment</string><string name="wallpaper_desc">Parallax Moment Live</string></resources>
