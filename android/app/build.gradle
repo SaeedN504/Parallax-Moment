@@ -3,8 +3,6 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-import java.security.MessageDigest
-
 final String midasFileName = 'midas_small_256_fp16.tflite'
 final String defaultMidasUrl = 'https://github.com/isl-org/MiDaS/releases/download/v2_1/model_opt.tflite'
 def generatedMidasAssetsDir = file("$buildDir/generated/midasAssets")
@@ -51,7 +49,7 @@ tasks.register('prepareMidasModel') {
             }
         }
 
-        MessageDigest digest = MessageDigest.getInstance('SHA-256')
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
         generatedMidasModel.withInputStream { input ->
             byte[] buffer = new byte[1024 * 1024]
             for (int read = input.read(buffer); read >= 0; read = input.read(buffer)) {
