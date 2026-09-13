@@ -1,31 +1,31 @@
 # Offline depth benchmark
 
-Parallax Moment uses depth only to create relative foreground/background motion. It does not need metric distance, so MiDaS Small v2.1 is the first offline candidate.
+Parallax Moment uses depth only to create relative foreground/background motion. It does not need metric distance, so the official MiDaS Small v2.1 mobile TFLite release is the first offline model.
 
 ## Model contract
 
-- Model: MiDaS Small v2.1, EfficientNet-Lite3 small decoder
-- Runtime: TensorFlow Lite / LiteRT-compatible `.tflite`
-- Input: 256 x 256 RGB float32, ImageNet normalized
-- Output: 256 x 256 relative inverse-depth map
-- Runtime policy: model and inference are fully offline
+- Model: official MiDaS v2.1 `model_opt.tflite`
+- Runtime: TensorFlow Lite 2.16.1
+- Input: 256 x 256 RGB float32 NHWC, normalized to `[-1, 1]`
+- Output: 65,536 float32 relative inverse-depth values (accepted as `[1,256,256]` or `[1,256,256,1]`)
+- Runtime policy: the model is packaged in the APK and inference is fully offline
 
-Add the model as `android/app/src/main/assets/midas_small_256_fp16.tflite` after verifying its license and SHA-256. The app never fetches model files at runtime.
+The old tracked `.tflite` was only a 133-byte Git LFS pointer. It is deliberately excluded from Android assets. `prepareMidasModel` downloads the official GitHub release into a generated assets directory during the build, rejects undersized responses, validates the TFLite header, and logs its SHA-256. The app performs no runtime download.
+
+Override the build-time source with `-PmidasModelUrl=<direct-url>` or `MIDAS_MODEL_URL=<direct-url>`.
 
 ## Build and run the compatibility test
 
 ```bash
 cd android
-./gradlew assembleDebug connectedDebugAndroidTest
+./gradlew clean assembleDebug connectedDebugAndroidTest
 ```
 
-The test checks that the model asset loads, inference returns a 256 x 256 finite normalized map, and the benchmark executes without a network dependency.
+The test checks that the generated model asset loads, inference returns a 256 x 256 finite normalized map, and the benchmark executes without a runtime network dependency.
 
 ## Benchmark harness
 
-`OfflineDepthBenchmark.run()` performs warmups, then records inference times for a bundled sample image. It reports median, p95, minimum, maximum, and approximate heap delta. Use the same APK and model on every phone.
-
-Record results by device:
+`OfflineDepthBenchmark.run()` performs warmups, then records inference times for a bundled or deterministic sample image. It reports median, p95, minimum, maximum, and approximate heap delta. Use the same APK and model on every phone.
 
 | Device | Android | CPU/GPU path | Model | Median ms | P95 ms | Notes |
 |---|---:|---|---|---:|---:|---|
@@ -41,8 +41,4 @@ Record results by device:
 
 ## Photo policy
 
-Parallax Moment processes user-selected photos locally and stores generated results locally. It does not upload, classify, block, or censor photo content. The UI should still explain that depth estimation can struggle with transparent hair, overlapping objects, reflective surfaces, and very low-light images. Users can refine the subject mask or choose safe motion when that happens.
-
-## Comparison plan
-
-Benchmark MiDaS Small first for broad device coverage. Add Depth Anything V2 Small later as an opt-in high-quality mode after measuring package size, memory, and latency on representative low-end, mid-range, and flagship devices. Do not mix depth scales between models without per-image normalization.
+Parallax Moment processes user-selected photos locally and stores generated results locally. It does not upload photos. Depth estimation can struggle with transparent hair, overlapping objects, reflective surfaces, and very low-light images.
