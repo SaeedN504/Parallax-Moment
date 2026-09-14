@@ -6,7 +6,7 @@ This is a standard Android project with a native WebView host, JavaScript bridge
 
 - JDK 17
 - Android SDK 35
-- Internet access during the first build to fetch the official MiDaS release
+- Internet access during the first build only if the local MiDaS model is absent
 - Android Studio Ladybug or newer, optional
 - A real Android device for `connectedDebugAndroidTest`
 
@@ -17,38 +17,26 @@ cd android
 ./gradlew clean assembleDebug
 ```
 
-`prepareMidasModel` downloads the official MiDaS v2.1 `model_opt.tflite` from GitHub Releases into the generated build assets, validates its size and TFLite header, and prints its SHA-256. Later builds reuse the generated file. The stale 133-byte Git LFS pointer in the source tree is excluded and can never be packaged.
+Before compilation, `verifyMidasModel` searches for `android/app/src/main/assets/midas_small_256_fp16.tflite`, rejects the old 133-byte LFS pointer, and computes a SHA-256 checksum. If the local file is missing or invalid, Gradle downloads the official MiDaS v2.1 `model_opt.tflite`, validates its size and TFLite header, and then checksums it. The verified copy is placed in generated build assets, never downloaded at runtime.
+
+To enforce a known checksum in CI or on your machine:
+
+```bash
+./gradlew assembleDebug -PmidasModelSha256=PASTE_64_HEX_CHAR_SHA256_HERE
+```
+
+You can also use `MIDAS_MODEL_SHA256` and `MIDAS_MODEL_URL` environment variables. The generated checksum is written to `android/app/build/generated/midasAssets/midas_small_256_fp16.tflite.sha256`.
 
 The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Offline MiDaS integration
 
-The app never downloads the model at runtime. `MidasDepthEstimator.kt` loads the model bundled by Gradle and uses the official model's `[-1, 1]` RGB preprocessing. Its output adapter accepts either `[1,256,256]` or `[1,256,256,1]` as long as the tensor contains exactly 65,536 float32 values.
+The app never downloads the model at runtime. `MidasDepthEstimator.kt` loads only the generated, verified model and uses the official model's `[-1, 1]` RGB preprocessing. Its output adapter accepts either `[1,256,256]` or `[1,256,256,1]` as long as the tensor contains exactly 65,536 float32 values.
 
-To use another direct mirror during the build:
-
-```bash
-./gradlew assembleDebug -PmidasModelUrl=https://example.com/model.tflite
-```
-
-or set `MIDAS_MODEL_URL`. Any mirror must provide the same tensor contract.
-
-Run the device verification with:
+Run device verification with:
 
 ```bash
 ./gradlew connectedDebugAndroidTest
 ```
 
 See [`DEPTH-BENCHMARK.md`](DEPTH-BENCHMARK.md) for the model contract, device tiers, and result table.
-
-## Architecture
-
-- `www/index.html`: editor UI
-- `www/imgly/`: offline subject-segmentation model and runtime
-- `MidasDepthEstimator.kt`: offline relative-depth inference
-- `OfflineDepthBenchmark.kt`: repeatable on-device timing harness
-- `MidasCompatibilityTest.kt`: Android compatibility test
-- `MainActivity.java`: WebView, photo picker, bridge, and wallpaper application
-- `DepthLiveWallpaperService.java`: ticking live wallpaper renderer
-
-Selected photos remain on the device. The app does not upload them. Depth estimation is best-effort and may use a safer motion path for difficult edges.
