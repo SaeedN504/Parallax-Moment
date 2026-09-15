@@ -21,6 +21,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -69,39 +70,54 @@ public class MainActivity extends Activity {
         DepthBridge(MainActivity activity, WebView webView) { this.activity = activity; this.webView = webView; }
 
         @JavascriptInterface public String apply(String base64Image, String settingsJson) {
+            Bitmap bitmap = null;
             try {
                 byte[] data = Base64.decode(base64Image, Base64.DEFAULT);
-                Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+                bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
                 if (bitmap == null) return fail("could not decode the exported image");
                 try (FileOutputStream out = activity.openFileOutput("depth-wallpaper.jpg", Context.MODE_PRIVATE)) { bitmap.compress(CompressFormat.JPEG, 92, out); }
                 if (settingsJson != null) try (FileOutputStream out = activity.openFileOutput("depth-settings.json", Context.MODE_PRIVATE)) { out.write(settingsJson.getBytes(StandardCharsets.UTF_8)); }
-                generateDepthMap(bitmap);
+                String depthWarning = generateDepthMap(bitmap);
                 String targets = "both";
                 if (settingsJson != null) try { targets = new JSONObject(settingsJson).optString("targets", "both"); } catch (Exception ignored) {}
                 if (!"home".equals(targets) && !"lock".equals(targets)) targets = "both";
                 WallpaperManager manager = WallpaperManager.getInstance(activity); boolean home = false, lock = false;
                 if ("home".equals(targets) || "both".equals(targets)) { if (Build.VERSION.SDK_INT >= 24) manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM); else manager.setBitmap(bitmap); home = true; }
                 if ("lock".equals(targets) || "both".equals(targets)) { if (Build.VERSION.SDK_INT >= 24) manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK); else manager.setBitmap(bitmap); lock = true; }
-                bitmap.recycle(); notifyWeb("window.__depthApplied&&window.__depthApplied('" + escape(targets) + "');");
-                return "ok:" + (home ? "home;" : "") + (lock ? "lock" : "");
-            } catch (Exception e) { return fail(e.getMessage() == null ? "wallpaper apply failed" : e.getMessage()); }
+                notifyWeb("window.__depthApplied&&window.__depthApplied('" + escape(targets) + "');");
+                if (depthWarning != null) {
+                    final String message = depthWarning;
+                    notifyWeb("window.__depthWarning&&window.__depthWarning('" + escape(message) + "');");
+                    activity.runOnUiThread(() -> Toast.makeText(activity, "Wallpaper applied in safe mode: " + message, Toast.LENGTH_LONG).show());
+                }
+                return "ok:" + (home ? "home;" : "") + (lock ? "lock" : "") + (depthWarning == null ? ";depth" : ";safe-mode");
+            } catch (Exception e) {
+                return fail(e.getMessage() == null ? "wallpaper apply failed" : e.getMessage());
+            } finally {
+                if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            }
         }
 
-        /** Runs the packaged offline MiDaS pass and stores an 8-bit grayscale map. */
-        private void generateDepthMap(Bitmap bitmap) {
-            try {
-                MidasDepthEstimator estimator = new MidasDepthEstimator(activity);
+        /** Runs packaged MiDaS and returns null on success or a user-facing safe-mode reason. */
+        private String generateDepthMap(Bitmap bitmap) {
+            try (MidasDepthEstimator estimator = new MidasDepthEstimator(activity)) {
                 MidasDepthEstimator.DepthResult result = estimator.estimate(bitmap);
                 Bitmap map = Bitmap.createBitmap(result.getWidth(), result.getWidth(), Bitmap.Config.ARGB_8888);
-                float[][] values = result.getNormalized();
-                for (int y = 0; y < result.getWidth(); y++) for (int x = 0; x < result.getWidth(); x++) {
-                    int v = Math.max(0, Math.min(255, Math.round(values[y][x] * 255f)));
-                    map.setPixel(x, y, android.graphics.Color.rgb(v, v, v));
+                try {
+                    float[][] values = result.getNormalized();
+                    for (int y = 0; y < result.getWidth(); y++) for (int x = 0; x < result.getWidth(); x++) {
+                        int v = Math.max(0, Math.min(255, Math.round(values[y][x] * 255f)));
+                        map.setPixel(x, y, android.graphics.Color.rgb(v, v, v));
+                    }
+                    try (FileOutputStream out = activity.openFileOutput("depth-map.png", Context.MODE_PRIVATE)) { map.compress(CompressFormat.PNG, 100, out); }
+                } finally {
+                    map.recycle();
                 }
-                try (FileOutputStream out = activity.openFileOutput("depth-map.png", Context.MODE_PRIVATE)) { map.compress(CompressFormat.PNG, 100, out); }
-                map.recycle(); estimator.close();
-            } catch (Exception ignored) {
+                return null;
+            } catch (Exception error) {
                 new File(activity.getFilesDir(), "depth-map.png").delete();
+                String message = error.getMessage();
+                return message == null || message.trim().isEmpty() ? "depth generation failed" : message;
             }
         }
 

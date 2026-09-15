@@ -3,6 +3,62 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+final String midasFileName = 'midas_small_256_fp16.tflite'
+final String expectedMidasSha256 = '93d871071edff1218973ce25ee27ce95ccd20450c70a55e1b89efa3f5a772cdd'
+final long expectedMidasSize = 66_338_288L
+def localMidasModel = file("$projectDir/src/main/assets/$midasFileName")
+def generatedMidasAssetsDir = file("$buildDir/generated/midasAssets")
+def generatedMidasModel = new File(generatedMidasAssetsDir, midasFileName)
+def generatedMidasChecksum = new File(generatedMidasAssetsDir, "${midasFileName}.sha256")
+
+def sha256Of = { File model ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    model.withInputStream { input ->
+        byte[] buffer = new byte[1024 * 1024]
+        for (int read = input.read(buffer); read >= 0; read = input.read(buffer)) {
+            if (read > 0) digest.update(buffer, 0, read)
+        }
+    }
+    digest.digest().collect { String.format('%02x', it) }.join()
+}
+
+def hasTfliteHeader = { File model ->
+    if (!model.isFile() || model.length() < 8) return false
+    model.withInputStream { input ->
+        byte[] header = new byte[8]
+        return input.read(header) == header.length && new String(header, 4, 4, 'US-ASCII') == 'TFL3'
+    }
+}
+
+tasks.register('verifyMidasModel') {
+    description = 'Verifies and stages the pinned MiDaS v2.1 model before Android compilation.'
+    group = 'verification'
+    outputs.files(generatedMidasModel, generatedMidasChecksum)
+
+    doLast {
+        if (!localMidasModel.isFile()) {
+            throw new GradleException("Missing ${midasFileName}. Put the verified model in ${localMidasModel}.")
+        }
+        if (localMidasModel.length() != expectedMidasSize) {
+            throw new GradleException("MiDaS size mismatch. Expected ${expectedMidasSize} bytes, got ${localMidasModel.length()}.")
+        }
+        if (!hasTfliteHeader(localMidasModel)) {
+            throw new GradleException('MiDaS model is not a valid TFLite file: TFL3 header missing.')
+        }
+        String actual = sha256Of(localMidasModel)
+        if (!expectedMidasSha256.equalsIgnoreCase(actual)) {
+            throw new GradleException("MiDaS checksum mismatch. Expected ${expectedMidasSha256}, got ${actual}.")
+        }
+
+        generatedMidasAssetsDir.mkdirs()
+        localMidasModel.withInputStream { input ->
+            generatedMidasModel.withOutputStream { output -> input.transferTo(output) }
+        }
+        generatedMidasChecksum.text = "${actual}  ${midasFileName}${System.lineSeparator()}"
+        logger.lifecycle("MiDaS model verified: ${actual}")
+    }
+}
+
 android {
     namespace 'com.depth.live.wallpaper'
     compileSdk 35
@@ -18,7 +74,8 @@ android {
 
     sourceSets {
         main {
-            assets.srcDirs = ['../../www', 'src/main/assets']
+            // Package the web editor plus only the staged, checksum-verified depth model.
+            assets.srcDirs = ['../../www', generatedMidasAssetsDir]
         }
     }
 
@@ -42,6 +99,8 @@ android {
         jvmTarget = '17'
     }
 }
+
+tasks.named('preBuild').configure { dependsOn('verifyMidasModel') }
 
 dependencies {
     implementation 'org.tensorflow:tensorflow-lite:2.16.1'

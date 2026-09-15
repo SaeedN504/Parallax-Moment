@@ -2,6 +2,7 @@ package com.depth.live.wallpaper
 
 import android.content.Context
 import android.graphics.Bitmap
+import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import java.io.Closeable
 import java.nio.ByteBuffer
@@ -9,7 +10,7 @@ import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
 
-/** Offline MiDaS Small v2.1 adapter. */
+/** Offline adapter for the official MiDaS v2.1 model_opt.tflite release. */
 class MidasDepthEstimator(
     context: Context,
     assetName: String = MODEL_ASSET,
@@ -17,15 +18,13 @@ class MidasDepthEstimator(
 ) : Closeable {
     companion object {
         const val MODEL_ASSET = "midas_small_256_fp16.tflite"
-        private val MEAN = floatArrayOf(0.485f, 0.456f, 0.406f)
-        private val STD = floatArrayOf(0.229f, 0.224f, 0.225f)
     }
 
     private val modelBuffer: ByteBuffer
     private val interpreter: Interpreter
     private val input: ByteBuffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3 * 4)
         .order(ByteOrder.nativeOrder())
-    private val output = Array(1) { Array(inputSize) { FloatArray(inputSize) } }
+    private val output: ByteBuffer
 
     init {
         val modelBytes = try {
@@ -33,6 +32,13 @@ class MidasDepthEstimator(
         } catch (error: Exception) {
             throw IllegalStateException("Missing packaged MiDaS model asset: $assetName", error)
         }
+        require(modelBytes.size > 60_000_000) {
+            "Invalid MiDaS model asset: expected the official model, got ${modelBytes.size} bytes"
+        }
+        require(modelBytes.size >= 8 && modelBytes.copyOfRange(4, 8).contentEquals("TFL3".toByteArray())) {
+            "Invalid MiDaS model asset: TensorFlow Lite header is missing"
+        }
+
         modelBuffer = ByteBuffer.allocateDirect(modelBytes.size)
             .order(ByteOrder.nativeOrder())
             .apply {
@@ -41,14 +47,24 @@ class MidasDepthEstimator(
             }
         interpreter = Interpreter(modelBuffer, Interpreter.Options().apply { setNumThreads(4) })
 
-        val inputShape = interpreter.getInputTensor(0).shape()
+        val inputTensor = interpreter.getInputTensor(0)
+        val inputShape = inputTensor.shape()
+        require(inputTensor.dataType() == DataType.FLOAT32) {
+            "Unexpected MiDaS input type: ${inputTensor.dataType()}"
+        }
         require(inputShape.contentEquals(intArrayOf(1, inputSize, inputSize, 3))) {
             "Unexpected MiDaS input shape: ${inputShape.contentToString()}"
         }
-        val outputShape = interpreter.getOutputTensor(0).shape()
-        require(outputShape.contentEquals(intArrayOf(1, inputSize, inputSize))) {
-            "Unexpected MiDaS output shape: ${outputShape.contentToString()}"
+
+        val outputTensor = interpreter.getOutputTensor(0)
+        val outputElements = outputTensor.shape().fold(1) { total, dimension -> total * dimension }
+        require(outputTensor.dataType() == DataType.FLOAT32) {
+            "Unexpected MiDaS output type: ${outputTensor.dataType()}"
         }
+        require(outputElements == inputSize * inputSize) {
+            "Unexpected MiDaS output shape: ${outputTensor.shape().contentToString()}"
+        }
+        output = ByteBuffer.allocateDirect(outputTensor.numBytes()).order(ByteOrder.nativeOrder())
     }
 
     fun estimate(bitmap: Bitmap): DepthResult {
@@ -62,16 +78,21 @@ class MidasDepthEstimator(
                 val r = ((pixel shr 16) and 0xff) / 255f
                 val g = ((pixel shr 8) and 0xff) / 255f
                 val b = (pixel and 0xff) / 255f
-                input.putFloat((r - MEAN[0]) / STD[0])
-                input.putFloat((g - MEAN[1]) / STD[1])
-                input.putFloat((b - MEAN[2]) / STD[2])
+                // The official model_opt.tflite mobile model expects RGB in [-1, 1].
+                input.putFloat(r * 2f - 1f)
+                input.putFloat(g * 2f - 1f)
+                input.putFloat(b * 2f - 1f)
             }
             input.rewind()
+            output.rewind()
             interpreter.run(input, output)
+            output.rewind()
 
+            val raw = FloatArray(inputSize * inputSize)
+            output.asFloatBuffer().get(raw)
             var minValue = Float.POSITIVE_INFINITY
             var maxValue = Float.NEGATIVE_INFINITY
-            for (row in output[0]) for (value in row) {
+            for (value in raw) {
                 require(value.isFinite()) { "MiDaS returned a non-finite depth value" }
                 minValue = min(minValue, value)
                 maxValue = max(maxValue, value)
@@ -79,7 +100,7 @@ class MidasDepthEstimator(
             val range = max(1e-6f, maxValue - minValue)
             val normalized = Array(inputSize) { y ->
                 FloatArray(inputSize) { x ->
-                    ((output[0][y][x] - minValue) / range).coerceIn(0f, 1f)
+                    ((raw[y * inputSize + x] - minValue) / range).coerceIn(0f, 1f)
                 }
             }
             return DepthResult(normalized, inputSize, minValue, maxValue)
