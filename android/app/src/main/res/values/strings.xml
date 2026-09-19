@@ -1,2 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources><string name="app_name">Parallax Moment</string><string name="wallpaper_desc">Parallax Moment Live</string></resources>
+<resources>
+    <string name="app_name">Parallax Moment</string>
+    <string name="wallpaper_desc">Parallax Moment Live</string>
+</resources>
