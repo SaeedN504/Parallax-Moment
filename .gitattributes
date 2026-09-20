@@ -1,3 +1,2 @@
 android/app/src/main/assets/*.tflite filter=lfs diff=lfs merge=lfs -text
 *.tflite filter=lfs diff=lfs merge=lfs -text
-android/app/src/main/assets/midas_small_256_fp16.tflite filter=lfs diff=lfs merge=lfs -text
