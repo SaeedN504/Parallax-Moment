@@ -4,11 +4,9 @@ plugins {
 }
 
 final String midasFileName = 'midas_small_256_fp16.tflite'
-final String defaultMidasUrl = 'https://github.com/isl-org/MiDaS/releases/download/v2_1/model_opt.tflite'
+final long expectedMidasSize = 66_338_288L
+final String expectedMidasSha256 = '93d871071edff1218973ce25ee27ce95ccd20450c70a55e1b89efa3f5a772cdd'
 def localMidasModel = file("$projectDir/src/main/assets/$midasFileName")
-def generatedMidasAssetsDir = file("$buildDir/generated/midasAssets")
-def generatedMidasModel = new File(generatedMidasAssetsDir, midasFileName)
-def generatedMidasChecksum = new File(generatedMidasAssetsDir, "${midasFileName}.sha256")
 
 def sha256Of = { File model ->
     def digest = java.security.MessageDigest.getInstance('SHA-256')
@@ -21,74 +19,26 @@ def sha256Of = { File model ->
     digest.digest().collect { String.format('%02x', it) }.join()
 }
 
-def isValidTflite = { File model ->
-    if (!model.isFile() || model.length() <= 60_000_000L) return false
+def hasTfliteHeader = { File model ->
+    if (!model.isFile() || model.length() < 8) return false
     model.withInputStream { input ->
         byte[] header = new byte[8]
         return input.read(header) == header.length && new String(header, 4, 4, 'US-ASCII') == 'TFL3'
     }
 }
 
-tasks.register('prepareMidasModel') {
-    description = 'Finds or downloads the MiDaS model, rejecting LFS pointers and corrupt files.'
-    group = 'build setup'
-    outputs.file(generatedMidasModel)
-
-    doLast {
-        generatedMidasAssetsDir.mkdirs()
-
-        if (isValidTflite(localMidasModel)) {
-            logger.lifecycle("Using local MiDaS model: ${localMidasModel}")
-            localMidasModel.withInputStream { input ->
-                generatedMidasModel.withOutputStream { output -> input.transferTo(output) }
-            }
-        }
-
-        String configuredUrl = providers.gradleProperty('midasModelUrl').orNull
-            ?: System.getenv('MIDAS_MODEL_URL')
-            ?: defaultMidasUrl
-
-        if (!isValidTflite(generatedMidasModel)) {
-            File temporaryModel = new File(generatedMidasAssetsDir, "${midasFileName}.part")
-            temporaryModel.delete()
-            logger.lifecycle("Downloading MiDaS model from ${configuredUrl}")
-            def connection = new URL(configuredUrl).openConnection()
-            connection.connectTimeout = 30_000
-            connection.readTimeout = 120_000
-            connection.setRequestProperty('User-Agent', 'Parallax-Moment-Android-Build')
-            connection.inputStream.withCloseable { input ->
-                temporaryModel.withOutputStream { output -> input.transferTo(output) }
-            }
-            if (!temporaryModel.renameTo(generatedMidasModel)) {
-                temporaryModel.withInputStream { input ->
-                    generatedMidasModel.withOutputStream { output -> input.transferTo(output) }
-                }
-                temporaryModel.delete()
-            }
-        }
-
-        if (!isValidTflite(generatedMidasModel)) {
-            throw new GradleException("MiDaS model is missing, too small, or not a valid TFLite file: ${generatedMidasModel}")
-        }
-    }
-}
-
 tasks.register('verifyMidasModel') {
-    description = 'Verifies the MiDaS SHA-256 checksum before Android compilation.'
+    description = 'Verifies the pinned MiDaS model before Android compilation.'
     group = 'verification'
-    dependsOn('prepareMidasModel')
-    inputs.file(generatedMidasModel)
-    outputs.file(generatedMidasChecksum)
+    inputs.file(localMidasModel)
 
     doLast {
-        String actual = sha256Of(generatedMidasModel)
-        String expected = providers.gradleProperty('midasModelSha256').orNull
-            ?: System.getenv('MIDAS_MODEL_SHA256')
-        if (expected != null && !expected.trim().equalsIgnoreCase(actual)) {
-            throw new GradleException("MiDaS checksum mismatch. Expected ${expected.trim()}, got ${actual}.")
-        }
-        generatedMidasChecksum.text = "${actual}  ${midasFileName}${System.lineSeparator()}"
-        logger.lifecycle("MiDaS checksum verified: ${actual}")
+        if (!localMidasModel.isFile()) throw new GradleException("Missing ${midasFileName} at ${localMidasModel}")
+        if (localMidasModel.length() != expectedMidasSize) throw new GradleException("MiDaS size mismatch. Expected ${expectedMidasSize} bytes, got ${localMidasModel.length()}.")
+        if (!hasTfliteHeader(localMidasModel)) throw new GradleException('MiDaS model is not a valid TFLite file: TFL3 header missing.')
+        String actual = sha256Of(localMidasModel)
+        if (!expectedMidasSha256.equalsIgnoreCase(actual)) throw new GradleException("MiDaS checksum mismatch. Expected ${expectedMidasSha256}, got ${actual}.")
+        logger.lifecycle("MiDaS model verified: ${actual}")
     }
 }
 
@@ -101,20 +51,12 @@ android {
         minSdk 23
         targetSdk 35
         versionCode 1
-        versionName '1.0'
+        versionName '1.0.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
 
-    sourceSets {
-        main {
-            // Only the generated, verified model is packaged. A stale LFS pointer cannot enter the APK.
-            assets.srcDirs = ['../../www', generatedMidasAssetsDir]
-        }
-    }
-
-    androidResources {
-        noCompress += ['tflite']
-    }
+    sourceSets { main { assets.srcDirs = ['../../www', 'src/main/assets'] } }
+    androidResources { noCompress += ['tflite'] }
 
     buildTypes {
         release {
@@ -127,17 +69,13 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = '17'
-    }
+    kotlinOptions { jvmTarget = '17' }
 }
 
 tasks.named('preBuild').configure { dependsOn('verifyMidasModel') }
 
 dependencies {
     implementation 'org.tensorflow:tensorflow-lite:2.16.1'
-
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test:core:1.6.1'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
