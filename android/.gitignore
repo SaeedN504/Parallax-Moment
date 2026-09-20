@@ -1,0 +1,42 @@
+# Android build outputs
+*.apk
+*.aar
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Generated build directories
+bin/
+gen/
+out/
+.gradle/
+build/
+.externalNativeBuild/
+.cxx/
+
+# Local Android configuration
+local.properties
+
+# IDE files
+*.iml
+.idea/
+.navigation/
+captures/
+vcs.xml
+
+# Logs, profiling, and generated reports
+*.log
+*.hprof
+proguard/
+lint/intermediates/
+lint/generated/
+lint/outputs/
+lint/tmp/
+
+# Signing keys should stay local
+*.jks
+*.keystore
+
+# Optional service configuration
+# google-services.json
