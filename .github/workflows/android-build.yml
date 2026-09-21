@@ -1,0 +1,125 @@
+name: Android Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "www/**"
+      - ".github/workflows/android-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "www/**"
+      - ".github/workflows/android-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Verify MiDaS model
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODEL="android/app/src/main/assets/midas_small_256_fp16.tflite"
+          EXPECTED_SIZE="66338288"
+          EXPECTED_SHA="93d871071edff1218973ce25ee27ce95ccd20450c70a55e1b89efa3f5a772cdd"
+
+          if [[ ! -f "$MODEL" ]]; then
+            echo "::error::Missing MiDaS model: $MODEL"
+            exit 1
+          fi
+
+          actual_size="$(stat --format=%s "$MODEL")"
+          actual_sha="$(sha256sum "$MODEL" | cut -d ' ' -f 1)"
+          header="$(dd if="$MODEL" bs=1 skip=4 count=4 2>/dev/null)"
+
+          echo "Model size: $actual_size bytes"
+          echo "Model SHA-256: $actual_sha"
+          echo "Model header: $header"
+
+          [[ "$actual_size" == "$EXPECTED_SIZE" ]] || {
+            echo "::error::MiDaS size mismatch: expected $EXPECTED_SIZE, got $actual_size"
+            exit 1
+          }
+
+          [[ "$actual_sha" == "$EXPECTED_SHA" ]] || {
+            echo "::error::MiDaS checksum mismatch"
+            exit 1
+          }
+
+          [[ "$header" == "TFL3" ]] || {
+            echo "::error::MiDaS file is not a valid TFLite file"
+            exit 1
+          }
+
+      - name: Make Gradle wrapper executable
+        working-directory: android
+        run: chmod +x gradlew
+
+      - name: Run unit tests and lint
+        working-directory: android
+        run: ./gradlew testDebugUnitTest lintDebug --stacktrace --no-daemon
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew clean assembleDebug --stacktrace --no-daemon
+
+      - name: Generate APK checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          sha256sum "$APK" | tee "${APK}.sha256"
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: parallax-moment-debug-apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/app-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-reports
+          path: |
+            android/app/build/reports/
+            android/app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
