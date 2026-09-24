@@ -60,7 +60,7 @@ object SceneStore {
         try { save(c,photo,mask,depth,s) } finally { photo.recycle(); mask.recycle(); depth.recycle() }
     }
     @Synchronized fun load(c:Context):Loaded? {
-        val rec=record(c) ?: return
+        val rec=record(c) ?: return null
         val id=rec.getString("scene"); require(Regex("[a-f0-9-]{36}").matches(id))
         val dir=File(root(c),id); val bitmaps=mutableListOf<Bitmap>()
         try {
