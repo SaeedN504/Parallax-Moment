@@ -9,14 +9,10 @@ buildscript {
         maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
     }
     dependencies {
-        // 8.6.0 is the first AGP tested with compileSdk 35, which this module targets.
+        // Kept identical to android/build.gradle so both modules build with one AGP.
         classpath 'com.android.tools.build:gradle:8.6.0'
         classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20'
     }
-}
-
-allprojects {
-    // Legacy block, kept for compatibility
 }
 
 task clean(type: Delete) {

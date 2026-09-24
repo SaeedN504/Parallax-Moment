@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.deepfx.clock'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.deepfx.clock'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    // The editor page, the imgly cutout engine and the MiDaS model are reused in place
+    // from the Parallax Moment tree so no large binary is duplicated in the repo.
+    sourceSets {
+        main {
+            assets.srcDirs = ['../web', '../../android/app/src/main/assets', '../../www']
+        }
+    }
+    androidResources { noCompress += ['tflite'] }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
+}

@@ -1,0 +1,6 @@
+# Editor backups produced by tools/patch-index.sh — never commit or bundle these.
+www/index.html.backup.*
+
+# Verdent session data and transient logs.
+.verdent/
+*.log
