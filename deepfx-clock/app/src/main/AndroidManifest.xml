@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.software.live_wallpaper" android:required="true" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <application android:allowBackup="false" android:label="DeepFX-Clock"
+        android:icon="@drawable/ic_launcher" android:supportsRtl="true"
+        android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service android:name=".DeepFxWallpaperService" android:label="DeepFX-Clock"
+            android:permission="android.permission.BIND_WALLPAPER" android:exported="true">
+            <intent-filter><action android:name="android.service.wallpaper.WallpaperService" /></intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/wallpaper" />
+        </service>
+    </application>
+</manifest>

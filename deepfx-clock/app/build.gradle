@@ -1,0 +1,69 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+def repoRoot = rootProject.projectDir.parentFile
+def generatedAssets = layout.buildDirectory.dir('generated/offlineAssets')
+tasks.register('prepareOfflineAssets') {
+    inputs.dir(new File(repoRoot, 'www/imgly/models'))
+    inputs.file(new File(repoRoot, 'android/app/src/main/assets/midas_small_256_fp16.tflite'))
+    outputs.dir(generatedAssets)
+    doLast {
+        File output = generatedAssets.get().asFile
+        output.mkdirs()
+        File midas = new File(repoRoot, 'android/app/src/main/assets/midas_small_256_fp16.tflite')
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        midas.withInputStream { input ->
+            byte[] buffer = new byte[1048576]
+            int count
+            while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+        }
+        String sha = digest.digest().encodeHex().toString()
+        if (sha != '93d871071edff1218973ce25ee27ce95ccd20450c70a55e1b89efa3f5a772cdd') {
+            throw new GradleException('MiDaS model checksum mismatch; restore the real model before building.')
+        }
+        copy { from midas; into output; rename { 'midas.tflite' } }
+        File segmentation = new File(output, 'isnet.onnx')
+        segmentation.withOutputStream { out ->
+            (0..10).each { index ->
+                File chunk = new File(repoRoot, String.format('www/imgly/models/q-%02d', index))
+                long expected = index == 10 ? 2399396L : 4194304L
+                if (chunk.length() != expected) throw new GradleException("Invalid segmentation chunk: ${chunk.name}")
+                chunk.withInputStream { it.transferTo(out) }
+            }
+        }
+        if (segmentation.length() != 44342436L) throw new GradleException('Incomplete segmentation model')
+    }
+}
+android {
+    namespace 'com.deepfx.clock'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.deepfx.clock'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    sourceSets.main.assets.srcDirs = ['../www', generatedAssets]
+    androidResources { noCompress += ['tflite', 'onnx'] }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    buildTypes { release { minifyEnabled false } }
+    lint { abortOnError true }
+}
+tasks.named('preBuild').configure { dependsOn('prepareOfflineAssets') }
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation 'androidx.exifinterface:exifinterface:1.3.7'
+    implementation 'org.tensorflow:tensorflow-lite:2.16.1'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
