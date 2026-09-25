@@ -1,0 +1,20 @@
+buildscript {
+    repositories {
+        // Official sources first: a mirror must never be preferred over the canonical artifact.
+        maven { url 'https://maven.google.com/' }
+        maven { url 'https://repo.maven.apache.org/maven2/' }
+        // Last-resort fallback for networks where the official hosts are unreachable.
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+    }
+    dependencies {
+        // Kept identical to android/build.gradle so both modules build with one AGP.
+        classpath 'com.android.tools.build:gradle:8.6.0'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20'
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

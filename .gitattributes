@@ -1,1 +1,21 @@
+# Binary artifacts — never apply text conversion, or git will corrupt them.
+*.tflite binary
+*.onnx binary
+*.wasm binary
+*.jar binary
+*.apk binary
+*.zip binary
+*.so binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ttf binary
+*.otf binary
 
+# Shell scripts must keep LF so they stay runnable on Linux and in CI.
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Windows batch files stay CRLF.
+*.bat text eol=crlf

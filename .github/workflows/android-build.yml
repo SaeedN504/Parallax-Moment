@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "android/**"
+      - "clockveil/**"
       - "www/**"
       - ".github/workflows/android-build.yml"
   push:
     branches: [main]
     paths:
       - "android/**"
+      - "clockveil/**"
       - "www/**"
       - ".github/workflows/android-build.yml"
   workflow_dispatch:
@@ -22,11 +24,15 @@ concurrency:
   group: android-build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build:
-    name: Build and test debug APK
+    name: Build and test debug APKs
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
@@ -34,18 +40,42 @@ jobs:
         with:
           lfs: true
 
-      - name: Set up JDK 17
+      # The Gradle daemon JVM criteria in android/gradle and clockveil/gradle pin
+      # toolchain 21, so the runner must expose a JDK 21.
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [[ -z "$SDKMANAGER" ]]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            echo "::error::sdkmanager not found on the runner"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+
+          for attempt in 1 2 3; do
+            if "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"; then
+              break
+            fi
+            echo "sdkmanager attempt $attempt failed, retrying in 15s"
+            sleep 15
+            if [[ "$attempt" == "3" ]]; then
+              echo "::error::Android SDK installation failed after 3 attempts"
+              exit 1
+            fi
+          done
 
       - name: Verify MiDaS model
         shell: bash
@@ -84,32 +114,38 @@ jobs:
             exit 1
           }
 
-      - name: Make Gradle wrapper executable
-        working-directory: android
-        run: chmod +x gradlew
+      - name: Make Gradle wrappers executable
+        run: |
+          chmod +x android/gradlew clockveil/gradlew
 
-      - name: Run unit tests and lint
+      - name: Run unit tests and lint (Parallax Moment)
         working-directory: android
         run: ./gradlew testDebugUnitTest lintDebug --stacktrace --no-daemon
 
-      - name: Build debug APK
+      - name: Build Parallax Moment debug APK
         working-directory: android
-        run: ./gradlew clean assembleDebug --stacktrace --no-daemon
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
 
-      - name: Generate APK checksum
+      - name: Build Deep FX Clock debug APK
+        working-directory: clockveil
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Generate APK checksums
         shell: bash
         run: |
           set -euo pipefail
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          sha256sum "$APK" | tee "${APK}.sha256"
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk | tee android/app/build/outputs/apk/debug/app-debug.apk.sha256
+          sha256sum clockveil/app/build/outputs/apk/debug/app-debug.apk | tee clockveil/app/build/outputs/apk/debug/app-debug.apk.sha256
 
-      - name: Upload debug APK
+      - name: Upload debug APKs
         uses: actions/upload-artifact@v4
         with:
           name: parallax-moment-debug-apk
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/debug/app-debug.apk.sha256
+            clockveil/app/build/outputs/apk/debug/app-debug.apk
+            clockveil/app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
