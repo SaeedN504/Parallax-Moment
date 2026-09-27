@@ -1,24 +1,27 @@
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex('com\\.android.*')
-                includeGroupByRegex('com\\.google.*')
-                includeGroupByRegex('androidx.*')
-            }
-        }
-        mavenCentral()
+        // Official sources first: a mirror must never be preferred over the canonical artifact.
+        maven { url 'https://maven.google.com/' }
+        maven { url 'https://repo.maven.apache.org/maven2/' }
         gradlePluginPortal()
+        // Last-resort fallback for networks where the official hosts are unreachable.
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
     }
 }
-
+plugins {
+    // Lets Gradle auto-provision the JDK 21 the daemon JVM criteria asks for.
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
-        mavenCentral()
+        maven { url 'https://maven.google.com/' }
+        maven { url 'https://repo.maven.apache.org/maven2/' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
     }
 }
-
-rootProject.name = 'ParallaxMoment'
+rootProject.name = "ParallaxMoment"
 include ':app'

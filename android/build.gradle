@@ -1,17 +1,24 @@
 buildscript {
     repositories {
-        google()
-        mavenCentral()
+        // Official sources first: a mirror must never be preferred over the canonical artifact.
+        maven { url 'https://maven.google.com/' }
+        maven { url 'https://repo.maven.apache.org/maven2/' }
+        // Last-resort fallback for networks where the official hosts are unreachable.
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
     }
     dependencies {
+        // 8.6.0 is the first AGP tested with compileSdk 35, which this module targets.
         classpath 'com.android.tools.build:gradle:8.6.0'
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20'
     }
 }
 
 allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
+    // Legacy block, kept for compatibility
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
 }

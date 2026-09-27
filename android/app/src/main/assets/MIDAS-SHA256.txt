@@ -1,5 +1,5 @@
 midas_small_256_fp16.tflite
-SHA-256: bec9bce704789e504ec306196fcb0aabe90fd25c2b9d7db382339741950890ca
-Size: 32M (33,554,432 bytes)
-Verified from the attached model file on 2026-09-12.
+SHA-256: 93d871071edff1218973ce25ee27ce95ccd20450c70a55e1b89efa3f5a772cdd
+Size: 66,338,288 bytes
+Verified from the supplied MiDaS model file.
 Source metadata: https://huggingface.co/litert-community/MiDaS-small

@@ -4,7 +4,10 @@ This is a standard Android project with a native WebView host, JavaScript bridge
 
 ## Requirements
 
-- JDK 17
+- JDK 21. Both modules pin it in `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`)
+  and ship the matching `toolchainUrl.*` entries, so Gradle downloads it on demand via the
+  foojay toolchain resolver declared in `settings.gradle`. AGP 8.6.x does not run on JDK 25,
+  so do not point the daemon at Android Studio's bundled JBR.
 - Android SDK 35
 - Internet access during the first build only if the local MiDaS model is absent
 - Android Studio Ladybug or newer, optional
