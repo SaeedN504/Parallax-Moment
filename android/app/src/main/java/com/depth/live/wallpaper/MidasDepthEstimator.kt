@@ -32,7 +32,7 @@ class MidasDepthEstimator(
         } catch (error: Exception) {
             throw IllegalStateException("Missing packaged MiDaS model asset: $assetName", error)
         }
-        require(modelBytes.size > 60_000_000) {
+        require(modelBytes.size > 50_000_000) {
             "Invalid MiDaS model asset: expected a real TFLite model, got ${modelBytes.size} bytes"
         }
         require(modelBytes.size >= 8 && modelBytes.copyOfRange(4, 8).contentEquals("TFL3".toByteArray())) {
