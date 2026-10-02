@@ -1,12 +1,18 @@
 # Parallax Moment
 
-**Turn any photo into a living Android wallpaper.** Offline subject cutout, layered clock typography, static wallpaper application, and a native ticking live wallpaper.
+**Turn any photo into a living Android wallpaper.** Offline subject cutout, layered clock typography, static wallpaper application, and a native live wallpaper with depth-parallax motion.
+
+## Live wallpaper features
+
+- **Depth mesh parallax** — continuous depth-driven warp (no strip artifacts), combining a slow ambient drift with **device tilt**: the scene moves as you physically tilt the phone.
+- **Clock behind the subject** — the subject cutout is drawn on top of the clock layer, iPhone-style.
+- **Rich clock layer** — 12/24-hour format, seconds, AM/PM badge, date line, font/weight/color/opacity/stretch/tracking, glow and shadow, all driven by the editor's settings schema.
 
 ## Native Android build
 
 The UI and offline AI remain in `www/`. A native Android WebView hosts that editor and owns photo picking, wallpaper application, and the live wallpaper service. No Node, npm, synchronization command, or cross-platform wrapper is required.
 
-Requirements: **JDK 17** and Android SDK **35**.
+Requirements: **JDK 21** and Android SDK **35**.
 
 ```bash
 cd android
@@ -37,3 +43,6 @@ android/                     Native Android project
 5. Optionally set the ticking live wallpaper.
 
 Selected images stay on the device and segmentation runs locally.
+
+
+

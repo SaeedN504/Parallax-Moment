@@ -4,8 +4,8 @@ This is a standard Android project with a native WebView host, JavaScript bridge
 
 ## Requirements
 
-- JDK 21. Both modules pin it in `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`)
-  and ship the matching `toolchainUrl.*` entries, so Gradle downloads it on demand via the
+- JDK 21. The module pins it in `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`)
+  and ships the matching `toolchainUrl.*` entries, so Gradle downloads it on demand via the
   foojay toolchain resolver declared in `settings.gradle`. AGP 8.6.x does not run on JDK 25,
   so do not point the daemon at Android Studio's bundled JBR.
 - Android SDK 35
@@ -43,3 +43,6 @@ Run device verification with:
 ```
 
 See [`DEPTH-BENCHMARK.md`](DEPTH-BENCHMARK.md) for the model contract, device tiers, and result table.
+
+
+

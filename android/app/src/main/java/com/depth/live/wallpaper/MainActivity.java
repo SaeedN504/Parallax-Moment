@@ -161,6 +161,24 @@ public class MainActivity extends Activity {
             }
         }
 
+        /** Stores the subject cutout (transparent PNG) so the live wallpaper can render the clock behind the subject. */
+        @JavascriptInterface
+        public boolean saveCutout(String base64Image) {
+            try {
+                if (base64Image == null || base64Image.isEmpty()) return false;
+                byte[] data = Base64.decode(base64Image, Base64.DEFAULT);
+                Bitmap cutout = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (cutout == null) return false;
+                try (FileOutputStream out = activity.openFileOutput("cutout.png", Context.MODE_PRIVATE)) {
+                    cutout.compress(CompressFormat.PNG, 100, out);
+                }
+                cutout.recycle();
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
         /** Runs the packaged offline MiDaS pass and stores an 8-bit grayscale map. */
         private void generateDepthMap(Bitmap bitmap) {
             try {
@@ -172,9 +190,12 @@ public class MainActivity extends Activity {
                 float[][] values = result.getNormalized();
                 int height = values.length;
                 int width = values[0].length;
-                
+
+                // Smooth MiDaS noise so the parallax motion field stays continuous.
+                values = boxBlur(values, 2, 2);
+
                 Bitmap map = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                
+
                 for (int y = 0; y < height; y++) {
                     for (int x = 0; x < width; x++) {
                         int v = Math.max(0, Math.min(255, Math.round(values[y][x] * 255f)));
@@ -191,6 +212,37 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
                 new File(activity.getFilesDir(), "depth-map.png").delete();
             }
+        }
+
+        /** Separable clamped box blur over a normalized depth field. */
+        private static float[][] boxBlur(float[][] src, int radius, int passes) {
+            int height = src.length;
+            int width = src[0].length;
+            float[][] a = src;
+            float[][] b = new float[height][width];
+            for (int pass = 0; pass < passes; pass++) {
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        float sum = 0f;
+                        for (int k = -radius; k <= radius; k++) {
+                            int n = Math.max(0, Math.min(width - 1, x + k));
+                            sum += a[y][n];
+                        }
+                        b[y][x] = sum / (2 * radius + 1);
+                    }
+                }
+                for (int y = 0; y < height; y++) {
+                    for (int x = 0; x < width; x++) {
+                        float sum = 0f;
+                        for (int k = -radius; k <= radius; k++) {
+                            int n = Math.max(0, Math.min(height - 1, y + k));
+                            sum += b[n][x];
+                        }
+                        a[y][x] = sum / (2 * radius + 1);
+                    }
+                }
+            }
+            return a;
         }
 
         @JavascriptInterface 
@@ -230,3 +282,5 @@ public class MainActivity extends Activity {
         }
     }
 }
+
+

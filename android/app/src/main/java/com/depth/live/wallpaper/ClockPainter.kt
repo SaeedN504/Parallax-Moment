@@ -1,4 +1,4 @@
-package com.deepfx.clock
+package com.depth.live.wallpaper
 
 import android.graphics.Canvas
 import android.graphics.Color
@@ -10,7 +10,7 @@ import java.util.Locale
 
 /**
  * Draws the clock layer using the editor's own settings schema, so the live
- * wallpaper matches the WebView preview exactly:
+ * wallpaper matches the WebView preview:
  *
  *   size        clock size slider, 0.06..0.7 of the screen height (480 = 0.48)
  *   opacity     0..100
