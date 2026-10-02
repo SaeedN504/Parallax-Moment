@@ -33,9 +33,6 @@ public final class DepthParallaxRenderer {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final float[] vertices = new float[GRID_W * GRID_H * 2];
-    private float[] depthGrid;
-    private Bitmap depthGridSource;
-    private int depthGridId = -1;
 
     public void draw(Canvas canvas, Bitmap photo, Bitmap depth, float phase, float strength) {
         draw(canvas, photo, depth, phase, strength, 0f, 0f);
@@ -116,7 +113,9 @@ public final class DepthParallaxRenderer {
         // Photo-space position of the canvas center within the overscanned frame.
         float u = (width / 2f - frame.left) / frame.width();
         float v = (height / 2f - frame.top) / frame.height();
-        float centered = (sampleBilinear(depth, u, v) - 0.5f) * 2f;
+        // Sample the same blurred depth grid the mesh vertices use — sampling
+        // the raw bitmap would drift the subject across sharp depth edges.
+        float centered = (sampleGridBilinear(depthField(depth), u * COLS, v * ROWS) - 0.5f) * 2f;
         float clampedTiltX = Math.max(-1f, Math.min(1f, tiltX));
         float clampedTiltY = Math.max(-1f, Math.min(1f, tiltY));
         RectF out = new RectF(frame);
@@ -131,6 +130,30 @@ public final class DepthParallaxRenderer {
     }
 
     /**
+     * Immutable snapshot of the built depth grid, published atomically through
+     * the volatile {@link #depthCache} field. Readers either see the previous
+     * complete snapshot or the new one — never torn state — so concurrent
+     * depthField() callers (draw() and cutoutFrame()) cannot observe a partial
+     * grid; the worst case under contention is a redundant rebuild. This does
+     * NOT make the renderer as a whole thread-safe: draw() mutates the shared
+     * reusable {@code vertices} array (paint is shared read-only), so render
+     * calls must stay on a single thread.
+     */
+    private static final class DepthCache {
+        final float[] grid;
+        final Bitmap source;
+        final int generationId;
+
+        DepthCache(float[] grid, Bitmap source, int generationId) {
+            this.grid = grid;
+            this.source = source;
+            this.generationId = generationId;
+        }
+    }
+
+    private volatile DepthCache depthCache;
+
+    /**
      * Depth sampled bilinearly at every mesh vertex, then box-blurred over the
      * grid so the motion field stays smooth. Cached per depth bitmap.
      */
@@ -138,7 +161,10 @@ public final class DepthParallaxRenderer {
         int generationId = depth.getGenerationId();
         // generationId alone is not a safe key: a freshly decoded bitmap also
         // starts at 0, so the identity of the source bitmap is checked too.
-        if (depthGrid != null && depthGridSource == depth && depthGridId == generationId) return depthGrid;
+        DepthCache cache = depthCache;
+        if (cache != null && cache.source == depth && cache.generationId == generationId) {
+            return cache.grid;
+        }
 
         float[] grid = new float[GRID_W * GRID_H];
         for (int j = 0; j <= ROWS; j++) {
@@ -151,9 +177,7 @@ public final class DepthParallaxRenderer {
             blurX(grid);
             blurY(grid);
         }
-        depthGrid = grid;
-        depthGridSource = depth;
-        depthGridId = generationId;
+        depthCache = new DepthCache(grid, depth, generationId);
         return grid;
     }
 
@@ -175,6 +199,27 @@ public final class DepthParallaxRenderer {
 
     private float red(Bitmap depth, int x, int y) {
         return ((depth.getPixel(x, y) >> 16) & 0xff) / 255f;
+    }
+
+    /**
+     * Bilinear interpolation over the blurred depth grid in grid coordinates
+     * (x in [0, COLS], y in [0, ROWS]) — the same field the mesh vertices
+     * displace with, so the cutout tracks the background exactly.
+     */
+    private static float sampleGridBilinear(float[] grid, float gx, float gy) {
+        float x = Math.max(0f, Math.min(COLS, gx));
+        float y = Math.max(0f, Math.min(ROWS, gy));
+        int x0 = (int) x;
+        int y0 = (int) y;
+        int x1 = Math.min(x0 + 1, COLS);
+        int y1 = Math.min(y0 + 1, ROWS);
+        float fx = x - x0;
+        float fy = y - y0;
+        float d00 = grid[y0 * GRID_W + x0];
+        float d10 = grid[y0 * GRID_W + x1];
+        float d01 = grid[y1 * GRID_W + x0];
+        float d11 = grid[y1 * GRID_W + x1];
+        return (d00 * (1 - fx) + d10 * fx) * (1 - fy) + (d01 * (1 - fx) + d11 * fx) * fy;
     }
 
     /** Clamped box blur along X; the grid is row-major with width GRID_W. */
